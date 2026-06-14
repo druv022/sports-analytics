@@ -1,0 +1,179 @@
+{
+  "n_samples": 146,
+  "n_groups": 99,
+  "n_splits": 5,
+  "labels": [
+    "closeup",
+    "full_court"
+  ],
+  "accuracy": 0.8972602739726028,
+  "macro_f1": 0.8816663964986222,
+  "confusion_matrix": [
+    [
+      92,
+      11
+    ],
+    [
+      4,
+      39
+    ]
+  ],
+  "fold_metrics": [
+    {
+      "fold": 1,
+      "n_train": 116,
+      "n_test": 30,
+      "accuracy": 0.9666666666666667,
+      "macro_f1": 0.9633699633699633
+    },
+    {
+      "fold": 2,
+      "n_train": 117,
+      "n_test": 29,
+      "accuracy": 0.896551724137931,
+      "macro_f1": 0.8512820512820514
+    },
+    {
+      "fold": 3,
+      "n_train": 117,
+      "n_test": 29,
+      "accuracy": 0.7586206896551724,
+      "macro_f1": 0.7478260869565218
+    },
+    {
+      "fold": 4,
+      "n_train": 117,
+      "n_test": 29,
+      "accuracy": 1.0,
+      "macro_f1": 1.0
+    },
+    {
+      "fold": 5,
+      "n_train": 117,
+      "n_test": 29,
+      "accuracy": 0.8620689655172413,
+      "macro_f1": 0.8473684210526315
+    }
+  ],
+  "misclassified": [
+    {
+      "path": "data/classification/closs-ups/scene_170_frame_85704.jpg",
+      "true_label": "closeup",
+      "predicted": "full_court",
+      "confidence": 0.5910701751708984
+    },
+    {
+      "path": "data/classification/closs-ups/scene_195_frame_105262.jpg",
+      "true_label": "closeup",
+      "predicted": "full_court",
+      "confidence": 0.5104955434799194
+    },
+    {
+      "path": "data/classification/closs-ups/scene_38_frame_19255.jpg",
+      "true_label": "closeup",
+      "predicted": "full_court",
+      "confidence": 0.9915335774421692
+    },
+    {
+      "path": "data/classification/closs-ups/scene_38_frame_19255_gt-closeup_pred-full_court.jpg",
+      "true_label": "closeup",
+      "predicted": "full_court",
+      "confidence": 0.9915335774421692
+    },
+    {
+      "path": "data/classification/closs-ups/scene_3_frame_1301.jpg",
+      "true_label": "closeup",
+      "predicted": "full_court",
+      "confidence": 0.5693584680557251
+    },
+    {
+      "path": "data/classification/closs-ups/scene_3_frame_1301_gt-closeup_pred-full_court.jpg",
+      "true_label": "closeup",
+      "predicted": "full_court",
+      "confidence": 0.5693584680557251
+    },
+    {
+      "path": "data/classification/closs-ups/scene_3_frame_1464_gt-closeup_pred-full_court.jpg",
+      "true_label": "closeup",
+      "predicted": "full_court",
+      "confidence": 0.5650954246520996
+    },
+    {
+      "path": "data/classification/closs-ups/scene_3_frame_1627_gt-closeup_pred-full_court.jpg",
+      "true_label": "closeup",
+      "predicted": "full_court",
+      "confidence": 0.5053799748420715
+    },
+    {
+      "path": "data/classification/closs-ups/scene_48_frame_24326_gt-closeup_pred-full_court.jpg",
+      "true_label": "closeup",
+      "predicted": "full_court",
+      "confidence": 0.6957985758781433
+    },
+    {
+      "path": "data/classification/closs-ups/scene_50_frame_26984_gt-closeup_pred-full_court.jpg",
+      "true_label": "closeup",
+      "predicted": "full_court",
+      "confidence": 0.8872438669204712
+    },
+    {
+      "path": "data/classification/closs-ups/scene_55_frame_30125_gt-closeup_pred-full_court.jpg",
+      "true_label": "closeup",
+      "predicted": "full_court",
+      "confidence": 0.5762579441070557
+    },
+    {
+      "path": "data/classification/full/scene_155_frame_78862.jpg",
+      "true_label": "full_court",
+      "predicted": "closeup",
+      "confidence": 0.6829613447189331
+    },
+    {
+      "path": "data/classification/full/scene_40_frame_20586_gt-full_court_pred-closeup.jpg",
+      "true_label": "full_court",
+      "predicted": "closeup",
+      "confidence": 0.8237494826316833
+    },
+    {
+      "path": "data/classification/full/scene_58_frame_31113_gt-full_court_pred-closeup.jpg",
+      "true_label": "full_court",
+      "predicted": "closeup",
+      "confidence": 0.7982434630393982
+    },
+    {
+      "path": "data/classification/full/scene_58_frame_31930_gt-full_court_pred-closeup.jpg",
+      "true_label": "full_court",
+      "predicted": "closeup",
+      "confidence": 0.8983463048934937
+    }
+  ],
+  "model_path": "models/scene_mlp.joblib",
+  "n_train_samples": 146,
+  "classification_report": {
+    "closeup": {
+      "precision": 0.9583333333333334,
+      "recall": 0.8932038834951457,
+      "f1-score": 0.9246231155778895,
+      "support": 103.0
+    },
+    "full_court": {
+      "precision": 0.78,
+      "recall": 0.9069767441860465,
+      "f1-score": 0.8387096774193549,
+      "support": 43.0
+    },
+    "accuracy": 0.8972602739726028,
+    "macro avg": {
+      "precision": 0.8691666666666666,
+      "recall": 0.900090313840596,
+      "f1-score": 0.8816663964986222,
+      "support": 146.0
+    },
+    "weighted avg": {
+      "precision": 0.905810502283105,
+      "recall": 0.8972602739726028,
+      "f1-score": 0.8993198426955812,
+      "support": 146.0
+    }
+  }
+}
