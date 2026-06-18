@@ -604,6 +604,75 @@ def test_aggregate_counts_enriched_frames(tmp_path):
     assert row["n_frames_enriched"] == 1
 
 
+def test_aggregate_dedupes_duration_across_complete_and_partial(tmp_path):
+    config = PipelineConfig(output_dir=tmp_path)
+    associated = pd.DataFrame(
+        [
+            {
+                "scene_id": 0,
+                "frame_number": 0,
+                "camera_id": "cam_0",
+                "raw_text": "CHASE",
+                "text_kind": "complete",
+                "mapped_complete_text": "CHASE",
+                "mapping_confidence": 1.0,
+                "readability_label": "good",
+                "bbox_json": "[]",
+            },
+            {
+                "scene_id": 0,
+                "frame_number": 0,
+                "camera_id": "cam_0",
+                "raw_text": "CHASEO",
+                "text_kind": "partial",
+                "mapped_complete_text": "CHASE",
+                "mapping_confidence": 0.83,
+                "readability_label": "partial",
+                "bbox_json": "[]",
+            },
+            {
+                "scene_id": 0,
+                "frame_number": 30,
+                "camera_id": "cam_0",
+                "raw_text": "CHASEO",
+                "text_kind": "partial",
+                "mapped_complete_text": "CHASE",
+                "mapping_confidence": 0.83,
+                "readability_label": "partial",
+                "bbox_json": "[]",
+            },
+        ]
+    )
+    frame_ocr = pd.DataFrame(
+        [
+            {"scene_id": 0, "frame_number": 0, "seconds": 0.0, "camera_id": "cam_0"},
+            {"scene_id": 0, "frame_number": 30, "seconds": 1.0, "camera_id": "cam_0"},
+        ]
+    )
+    meta = VideoMeta(
+        path=tmp_path / "video.mp4",
+        fps=30.0,
+        frame_count=60,
+        duration_sec=2.0,
+        width=1920,
+        height=1080,
+    )
+    scenes = [Scene(scene_id=0, start_frame=0, end_frame=60, start_sec=0.0, end_sec=2.0)]
+    complete_df, partial_df, _summary = aggregate_text_timeline(
+        config, associated, frame_ocr, meta, scenes
+    )
+    complete_row = complete_df.iloc[0]
+    partial_row = partial_df.iloc[0]
+    assert complete_row["total_duration_sec"] == 1.0
+    assert partial_row["total_duration_sec"] == 1.0
+    assert complete_row["n_frames_present"] == 1
+    assert partial_row["n_frames_present"] == 2
+    combined = float(complete_row["total_duration_sec"]) + float(
+        partial_row["total_duration_sec"]
+    )
+    assert combined == 2.0
+
+
 def test_slot_durations():
     frame_ocr = pd.DataFrame(
         [

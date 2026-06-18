@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections import defaultdict
 from pathlib import Path
 
 import pandas as pd
@@ -73,6 +74,49 @@ def _merge_frame_ranges(frames: list[int]) -> str:
     return ";".join(ranges)
 
 
+def _bucket_total_duration(
+    duration_frames: set[tuple[int, int]],
+    durations: dict[tuple[int, int], float],
+) -> float:
+    return sum(durations.get(frame_key, 0.0) for frame_key in duration_frames)
+
+
+def _new_aggregate_bucket() -> dict:
+    return {
+        "duration_frames": set(),
+        "frames": [],
+        "frames_present": set(),
+        "frames_good": set(),
+        "frames_partial": set(),
+        "frames_enriched": set(),
+    }
+
+
+def _accumulate_association_row(
+    bucket: dict,
+    *,
+    scene_id: int,
+    frame_number: int,
+    readability: str,
+    enrich_applied: bool,
+    claim_key: tuple[str, str],
+    mapped_claimed: dict[tuple[str, str], set[tuple[int, int]]],
+) -> None:
+    frame_key = (scene_id, frame_number)
+    bucket["frames"].append(frame_number)
+    bucket["frames_present"].add(frame_number)
+    if readability == "good":
+        bucket["frames_good"].add(frame_number)
+    else:
+        bucket["frames_partial"].add(frame_number)
+    if enrich_applied:
+        bucket["frames_enriched"].add(frame_number)
+
+    if frame_key not in mapped_claimed[claim_key]:
+        bucket["duration_frames"].add(frame_key)
+        mapped_claimed[claim_key].add(frame_key)
+
+
 def aggregate_text_timeline(
     config: PipelineConfig,
     associated: pd.DataFrame,
@@ -84,61 +128,48 @@ def aggregate_text_timeline(
 
     complete_groups: dict[tuple[str, str], dict] = {}
     partial_groups: dict[tuple[str, str, str], dict] = {}
+    mapped_claimed: dict[tuple[str, str], set[tuple[int, int]]] = defaultdict(set)
 
-    for row in associated.itertuples(index=False):
+    complete_rows = associated[associated["text_kind"] == "complete"]
+    partial_rows_df = associated[associated["text_kind"] != "complete"]
+
+    for row in complete_rows.itertuples(index=False):
         scene_id = int(getattr(row, "scene_id"))
         frame_number = int(getattr(row, "frame_number"))
         camera_id = str(getattr(row, "camera_id"))
-        text_kind = str(getattr(row, "text_kind"))
+        mapped = str(getattr(row, "mapped_complete_text"))
+        readability = str(getattr(row, "readability_label", "partial"))
+        key = (camera_id, mapped)
+        bucket = complete_groups.setdefault(key, _new_aggregate_bucket())
+        _accumulate_association_row(
+            bucket,
+            scene_id=scene_id,
+            frame_number=frame_number,
+            readability=readability,
+            enrich_applied=bool(getattr(row, "enrich_applied", False)),
+            claim_key=key,
+            mapped_claimed=mapped_claimed,
+        )
+
+    for row in partial_rows_df.itertuples(index=False):
+        scene_id = int(getattr(row, "scene_id"))
+        frame_number = int(getattr(row, "frame_number"))
+        camera_id = str(getattr(row, "camera_id"))
         raw_text = str(getattr(row, "raw_text"))
         mapped = str(getattr(row, "mapped_complete_text"))
         readability = str(getattr(row, "readability_label", "partial"))
-        slot = durations.get((scene_id, frame_number), 0.0)
-
-        if text_kind == "complete":
-            key = (camera_id, mapped)
-            bucket = complete_groups.setdefault(
-                key,
-                {
-                    "duration": 0.0,
-                    "frames": [],
-                    "frames_present": set(),
-                    "frames_good": set(),
-                    "frames_partial": set(),
-                    "frames_enriched": set(),
-                },
-            )
-            bucket["duration"] += slot
-            bucket["frames"].append(frame_number)
-            bucket["frames_present"].add(frame_number)
-            if readability == "good":
-                bucket["frames_good"].add(frame_number)
-            else:
-                bucket["frames_partial"].add(frame_number)
-            if bool(getattr(row, "enrich_applied", False)):
-                bucket["frames_enriched"].add(frame_number)
-        else:
-            key = (camera_id, raw_text, mapped)
-            bucket = partial_groups.setdefault(
-                key,
-                {
-                    "duration": 0.0,
-                    "frames": [],
-                    "frames_present": set(),
-                    "frames_good": set(),
-                    "frames_partial": set(),
-                    "frames_enriched": set(),
-                },
-            )
-            bucket["duration"] += slot
-            bucket["frames"].append(frame_number)
-            bucket["frames_present"].add(frame_number)
-            if readability == "good":
-                bucket["frames_good"].add(frame_number)
-            else:
-                bucket["frames_partial"].add(frame_number)
-            if bool(getattr(row, "enrich_applied", False)):
-                bucket["frames_enriched"].add(frame_number)
+        bucket_key = (camera_id, raw_text, mapped)
+        claim_key = (camera_id, mapped)
+        bucket = partial_groups.setdefault(bucket_key, _new_aggregate_bucket())
+        _accumulate_association_row(
+            bucket,
+            scene_id=scene_id,
+            frame_number=frame_number,
+            readability=readability,
+            enrich_applied=bool(getattr(row, "enrich_applied", False)),
+            claim_key=claim_key,
+            mapped_claimed=mapped_claimed,
+        )
 
     def _dominant_readability(value: dict) -> str:
         n_good = len(value["frames_good"])
@@ -151,7 +182,7 @@ def aggregate_text_timeline(
             "text": key[1],
             "text_kind": "complete",
             "mapped_complete_text": key[1],
-            "total_duration_sec": value["duration"],
+            "total_duration_sec": _bucket_total_duration(value["duration_frames"], durations),
             "frame_ranges": _merge_frame_ranges(value["frames"]),
             "n_frames_present": len(value["frames_present"]),
             "n_frames_good": len(value["frames_good"]),
@@ -168,7 +199,7 @@ def aggregate_text_timeline(
             "text": key[1],
             "text_kind": "partial",
             "mapped_complete_text": key[2],
-            "total_duration_sec": value["duration"],
+            "total_duration_sec": _bucket_total_duration(value["duration_frames"], durations),
             "frame_ranges": _merge_frame_ranges(value["frames"]),
             "n_frames_present": len(value["frames_present"]),
             "n_frames_good": len(value["frames_good"]),

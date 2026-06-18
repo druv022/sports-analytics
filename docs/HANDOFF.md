@@ -646,9 +646,10 @@ With `--resume`, a stage is skipped when its primary output artifact already exi
 **What happens:**
 1. Group by `(camera_id, text)` separating complete vs partial kinds
 2. Compute slot durations from frame spacing and scene end boundaries
-3. Merge contiguous frame ranges
-4. Track readability and enrichment counts per row
-5. Write summary JSON
+3. Count each `(camera_id, mapped_complete_text, frame)` once for `total_duration_sec` — complete rows claim frames first; partial rows only add duration for frames not already claimed for the same mapped text
+4. Merge contiguous frame ranges (all appearances, including frames whose duration was claimed elsewhere)
+5. Track readability and enrichment counts per row
+6. Write summary JSON
 
 **Outputs:**
 - `aggregated_complete.csv`
