@@ -14,16 +14,16 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from src.camera_assignemnt.approach_4.config import (  # noqa: E402
+from src.camera_assignemnt.embedding_cluster.config import (  # noqa: E402
     EMBEDDING_OUTPUT_SLUGS,
     ClusterConfig,
     EmbeddingConfig,
     PipelineConfig,
     resolve_method_and_backend,
 )
-from src.camera_assignemnt.approach_4.pipeline import assign_cameras  # noqa: E402
-from src.camera_assignemnt.approach_4.summarize import summarize_clusters  # noqa: E402
-from src.camera_assignemnt.approach_4.visualize import (  # noqa: E402
+from src.camera_assignemnt.embedding_cluster.pipeline import assign_cameras  # noqa: E402
+from src.camera_assignemnt.embedding_cluster.summarize import summarize_clusters  # noqa: E402
+from src.camera_assignemnt.embedding_cluster.visualize import (  # noqa: E402
     plot_tsne,
     plotting_available,
     save_cluster_montages,

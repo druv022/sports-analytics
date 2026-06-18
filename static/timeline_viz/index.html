@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <title>Timeline Visualization</title>
+  <link rel="stylesheet" href="/assets/styles.css?v=__ASSET_VERSION__">
+</head>
+<body>
+  <header class="header">
+    <h1>Timeline Visualization</h1>
+    <div id="summary" class="summary muted">Loading pipeline summary…</div>
+  </header>
+
+  <nav class="tab-bar" role="tablist" aria-label="Visualization views">
+    <button class="tab active" type="button" role="tab" data-tab="timeline" aria-selected="true" aria-controls="tab-timeline">Timeline</button>
+    <button class="tab" type="button" role="tab" data-tab="cameras" aria-selected="false" aria-controls="tab-cameras">Camera collage</button>
+    <button class="tab" type="button" role="tab" data-tab="appearance" aria-selected="false" aria-controls="tab-appearance">Appearance</button>
+  </nav>
+
+  <div id="tab-timeline" class="tab-panel" role="tabpanel">
+    <main class="layout">
+      <section class="panel search-panel">
+        <label for="search-input" class="label">Search mapped complete text</label>
+        <div class="search-wrap">
+          <input
+            id="search-input"
+            type="search"
+            placeholder="Search mapped_complete_text…"
+            autocomplete="off"
+          >
+          <ul id="suggestions" class="suggestions hidden" role="listbox"></ul>
+        </div>
+        <div class="filter-bar" id="filter-bar">
+          <div id="filter-camera"></div>
+          <div id="filter-text"></div>
+          <div id="filter-kind"></div>
+          <div id="filter-mapped"></div>
+          <div class="filter-duration">
+            <label for="filter-duration-min">Duration (s)</label>
+            <input id="filter-duration-min" type="number" min="0" step="1" placeholder="Min" aria-label="Minimum duration in seconds">
+            <span class="filter-duration-sep">–</span>
+            <input id="filter-duration-max" type="number" min="0" step="1" placeholder="Max" aria-label="Maximum duration in seconds">
+          </div>
+          <button type="button" id="filter-reset" class="filter-reset">Reset filters</button>
+        </div>
+        <p id="result-count" class="muted"></p>
+      </section>
+
+      <section class="panel">
+        <h2>Aggregated timeline</h2>
+        <div class="table-wrap">
+          <table id="results-table">
+            <thead>
+              <tr>
+                <th>Camera</th>
+                <th>Text</th>
+                <th>Kind</th>
+                <th>Enriched</th>
+                <th>Mapped</th>
+                <th>Duration</th>
+                <th>Frame ranges</th>
+              </tr>
+            </thead>
+            <tbody id="results-body"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel" id="detail-panel" hidden>
+        <h2>Row detail</h2>
+        <div class="detail-layout">
+          <div id="detail-meta" class="detail-meta"></div>
+          <div class="detail-preview">
+            <div class="detail-preview-header">
+              <span id="detail-frame-label" class="muted">Frame preview</span>
+              <div class="zoom-controls">
+                <button type="button" id="detail-zoom-out" title="Zoom out">−</button>
+                <span id="detail-zoom-label">100%</span>
+                <button type="button" id="detail-zoom-in" title="Zoom in">+</button>
+                <button type="button" id="detail-zoom-reset" title="Reset zoom">Reset</button>
+              </div>
+              <span id="detail-ocr-status" class="muted"></span>
+            </div>
+            <p class="zoom-hint muted">Scroll to zoom · drag to pan</p>
+            <div id="detail-canvas-wrap" class="detail-canvas-wrap">
+              <canvas id="detail-frame-canvas"></canvas>
+            </div>
+          </div>
+        </div>
+        <h3>Frames</h3>
+        <ul id="frame-list" class="frame-list"></ul>
+      </section>
+
+      <section class="panel ocr-panel">
+        <h2>OCR playground</h2>
+        <p class="muted">Upload an image to run scene OCR and draw bounding boxes with labels.</p>
+        <div class="ocr-controls">
+          <input id="ocr-file" type="file" accept="image/*">
+          <button id="ocr-run" type="button" disabled>Run OCR</button>
+          <span id="ocr-status" class="muted"></span>
+        </div>
+        <div class="canvas-wrap">
+          <canvas id="ocr-canvas"></canvas>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div id="tab-cameras" class="tab-panel" role="tabpanel" hidden>
+    <main class="layout">
+      <section class="panel">
+        <h2>Camera collage</h2>
+        <div id="camera-debug-banner" class="camera-debug-banner hidden"></div>
+        <div class="camera-picker-toolbar">
+          <label for="camera-filter" class="label">Filter cameras</label>
+          <input id="camera-filter" type="search" placeholder="Filter by camera id…" autocomplete="off">
+          <div class="camera-picker-actions">
+            <button type="button" id="camera-select-all" class="btn-secondary">Select all</button>
+            <button type="button" id="camera-clear-all" class="btn-secondary">Clear</button>
+          </div>
+        </div>
+        <div id="camera-checkbox-list" class="camera-checkbox-list" role="group" aria-label="Camera selection"></div>
+        <p id="camera-scene-count" class="muted"></p>
+        <div id="camera-scene-pickers" class="camera-scene-pickers hidden" hidden></div>
+        <div class="camera-compare-controls hidden" id="camera-compare-controls" hidden>
+          <label class="checkbox-inline">
+            <input type="checkbox" id="camera-include-global" checked>
+            Global scatter context
+          </label>
+          <button type="button" id="camera-compare-btn" class="btn-primary" disabled>Compare selected</button>
+        </div>
+        <div id="camera-collage" class="camera-collage"></div>
+      </section>
+      <section class="panel hidden" id="camera-compare-panel" hidden>
+        <h2>Cluster comparison</h2>
+        <div id="camera-compare-status" class="muted"></div>
+        <div id="camera-compare-explanations" class="compare-explanations"></div>
+        <div id="camera-compare-pairwise" class="compare-pairwise"></div>
+        <div class="compare-scenes-scroll-wrap">
+          <p class="compare-scenes-scroll-hint muted">Scroll horizontally to view all selected camera cards</p>
+          <div id="camera-compare-scenes" class="compare-scenes"></div>
+        </div>
+        <div class="compare-global-wrap">
+          <h3>Global embedding (t-SNE)</h3>
+          <p id="camera-global-caption" class="muted compare-global-caption"></p>
+          <div class="compare-global-toolbar">
+            <div class="zoom-controls">
+              <button type="button" id="camera-global-zoom-out" title="Zoom out">−</button>
+              <span id="camera-global-zoom-label">100%</span>
+              <button type="button" id="camera-global-zoom-in" title="Zoom in">+</button>
+              <button type="button" id="camera-global-zoom-reset" title="Reset zoom">Reset</button>
+            </div>
+            <p class="zoom-hint muted">Scroll to zoom · drag to pan</p>
+          </div>
+          <div id="camera-global-canvas-wrap" class="camera-global-canvas-wrap">
+            <canvas id="camera-global-canvas" width="900" height="420"></canvas>
+            <div id="camera-global-tooltip" class="camera-global-tooltip hidden" hidden></div>
+          </div>
+          <div id="camera-global-legend" class="camera-global-legend"></div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div id="tab-appearance" class="tab-panel" role="tabpanel" hidden>
+    <main class="layout">
+      <section class="panel">
+        <h2>Appearance summary</h2>
+        <div id="appearance-banner" class="appearance-banner hidden"></div>
+        <div id="appearance-summary" class="appearance-summary muted">Loading appearance data…</div>
+        <div id="appearance-histogram" class="appearance-histogram"></div>
+      </section>
+
+      <section class="panel">
+        <h2>Scenes</h2>
+        <div class="appearance-filter-bar">
+          <label>
+            Status
+            <select id="appearance-filter-status">
+              <option value="">All</option>
+              <option value="ok">ok</option>
+              <option value="low_conf">low_conf</option>
+              <option value="no_person">no_person</option>
+            </select>
+          </label>
+          <label>
+            Scene type
+            <select id="appearance-filter-type">
+              <option value="">All</option>
+              <option value="closeup">closeup</option>
+              <option value="full_court">full_court</option>
+            </select>
+          </label>
+          <label>
+            Person count
+            <select id="appearance-filter-count">
+              <option value="">All</option>
+            </select>
+          </label>
+          <label class="checkbox-inline">
+            <input type="checkbox" id="appearance-filter-variance">
+            Count variance only
+          </label>
+        </div>
+        <p id="appearance-scene-count" class="muted"></p>
+        <div class="table-wrap">
+          <table id="appearance-scenes-table">
+            <thead>
+              <tr>
+                <th>Scene</th>
+                <th>Camera</th>
+                <th>Type</th>
+                <th>Count</th>
+                <th>Colors</th>
+                <th>Signature</th>
+                <th>Conf</th>
+                <th>Status</th>
+                <th>Var</th>
+              </tr>
+            </thead>
+            <tbody id="appearance-scenes-body"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel" id="appearance-inspector" hidden>
+        <h2>Scene inspector</h2>
+        <div id="appearance-inspector-meta" class="detail-meta"></div>
+        <div class="appearance-slot-strip" id="appearance-slot-strip"></div>
+        <div class="appearance-inspector-controls">
+          <label class="checkbox-inline">
+            <input type="checkbox" id="appearance-live-segment" checked>
+            Live segmentation overlay
+          </label>
+          <span id="appearance-segment-status" class="muted"></span>
+        </div>
+        <div class="detail-preview">
+          <div class="detail-preview-header">
+            <span id="appearance-frame-label" class="muted">Frame preview</span>
+            <div class="zoom-controls">
+              <button type="button" id="appearance-zoom-out" title="Zoom out">−</button>
+              <span id="appearance-zoom-label">100%</span>
+              <button type="button" id="appearance-zoom-in" title="Zoom in">+</button>
+              <button type="button" id="appearance-zoom-reset" title="Reset zoom">Reset</button>
+            </div>
+          </div>
+          <p class="zoom-hint muted">Scroll to zoom · drag to pan</p>
+          <div id="appearance-canvas-wrap" class="detail-canvas-wrap">
+            <canvas id="appearance-canvas"></canvas>
+          </div>
+        </div>
+        <h3>Frames</h3>
+        <div class="table-wrap">
+          <table class="appearance-frame-table">
+            <thead>
+              <tr>
+                <th>Frame</th>
+                <th>Count</th>
+                <th>Colors</th>
+                <th>Conf</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody id="appearance-frames-body"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="/assets/camera_compare.js?v=__ASSET_VERSION__"></script>
+  <script src="/assets/cameras.js?v=__ASSET_VERSION__"></script>
+  <script src="/assets/appearance.js?v=__ASSET_VERSION__"></script>
+  <script src="/assets/app.js?v=__ASSET_VERSION__"></script>
+</body>
+</html>

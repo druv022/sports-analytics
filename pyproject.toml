@@ -32,6 +32,37 @@ embedding = [
     "matplotlib>=3.8",
     "certifi>=2024.0",
 ]
+ocr = [
+    "rapidocr>=3.8",
+    "onnxruntime>=1.17",
+]
+ocr-gpu = [
+    "rapidocr>=3.8",
+    "onnxruntime-gpu>=1.17",
+]
+ocr-vlm = [
+    "openai>=1.40",
+]
+gpu = [
+    "torch>=2.0",
+    "torchvision>=0.15",
+    "certifi>=2024.0",
+    "rapidocr>=3.8",
+    "onnxruntime-gpu>=1.17",
+]
+viz = [
+    "fastapi>=0.100",
+    "uvicorn[standard]>=0.30",
+    "python-multipart>=0.0.9",
+    "onnxruntime>=1.17",
+]
+appearance = [
+    "onnxruntime>=1.17",
+]
+appearance-export = [
+    "ultralytics>=8.3",
+    "onnx>=1.17",
+]
 dev = [
     "pytest>=8.0",
     "matplotlib>=3.8",

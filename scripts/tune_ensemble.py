@@ -11,13 +11,13 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from src.camera_assignemnt.approach_4.config import (  # noqa: E402
+from src.camera_assignemnt.embedding_cluster.config import (  # noqa: E402
     DEFAULT_ENSEMBLE_TUNING_PATH,
     ClusterConfig,
     EmbeddingConfig,
     PipelineConfig,
 )
-from src.camera_assignemnt.approach_4.ensemble_tune import (  # noqa: E402
+from src.camera_assignemnt.embedding_cluster.ensemble_tune import (  # noqa: E402
     save_ensemble_tuning,
     tune_ensemble,
 )

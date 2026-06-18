@@ -1,8 +1,8 @@
 from pathlib import Path
 
-import cv2
-import pandas as pd
-from scenedetect import ContentDetector, SceneManager, open_video
+from broadcast_pipeline.config import PipelineConfig
+from broadcast_pipeline.scene_extractor import extract_scenes_and_frames, save_scenes
+from broadcast_pipeline.video_meta import probe_video, save_video_meta
 
 VIDEO_PATH = "data/Untitled.mp4"
 OUTPUT_DIR = Path("data/scene_samples")
@@ -10,94 +10,51 @@ CSV_PATH = Path("data/scene_samples.csv")
 DETECTOR_THRESHOLD = 27.0
 
 
-def scene_frame_numbers(start, end):
-    """Return (image_idx, frame_num) for start, middle, and end of a scene."""
-    last_frame = end.frame_num - 1
-    candidates = [
-        (0, start.frame_num),
-        (1, (start.frame_num + last_frame) // 2),
-        (2, last_frame),
-    ]
-    seen = set()
-    result = []
-    for image_idx, frame_num in candidates:
-        if frame_num not in seen:
-            seen.add(frame_num)
-            result.append((image_idx, frame_num))
-    return result
-
-
-def detect_scenes(video_path: str):
-    video = open_video(video_path)
-    scene_manager = SceneManager()
-    scene_manager.add_detector(ContentDetector(threshold=DETECTOR_THRESHOLD))
-    scene_manager.detect_scenes(video, show_progress=True)
-    return video, scene_manager.get_scene_list()
-
-
-def build_targets(scene_list):
-    """Map frame_num -> metadata rows to write when that frame is read."""
-    targets = {}
-    for scene_idx, (start, end) in enumerate(scene_list):
-        for image_idx, frame_num in scene_frame_numbers(start, end):
-            rel_path = OUTPUT_DIR / f"scene_{scene_idx}_frame_{frame_num}.jpg"
-            targets.setdefault(frame_num, []).append(
-                {
-                    "scene_id": scene_idx,
-                    "image_idx": image_idx,
-                    "frame_number": frame_num,
-                    "frame_path": str(rel_path),
-                }
-            )
-    return targets
-
-
-def extract_frames(video, targets):
-    """Single linear pass through the video — much faster than repeated seek()."""
-    video.reset()
-    rows = []
-    frame_num = 0
-
-    while True:
-        frame = video.read()
-        if frame is False:
-            break
-
-        if frame_num in targets:
-            pos = video.position
-            for meta in targets[frame_num]:
-                path = Path(meta["frame_path"])
-                if not cv2.imwrite(str(path), frame):
-                    raise RuntimeError(f"Failed to write {path}")
-
-                rows.append(
-                    {
-                        **meta,
-                        "timecode": pos.get_timecode(),
-                        "seconds": pos.seconds,
-                        "height": frame.shape[0],
-                        "width": frame.shape[1],
-                    }
-                )
-
-        frame_num += 1
-
-    return rows
-
-
 def extract_frames_from_video(video_path: str = VIDEO_PATH):
-    video_path = str(video_path)
-    if not Path(video_path).exists():
-        raise FileNotFoundError(f"Video not found: {video_path}")
+    config = PipelineConfig(
+        video_path=Path(video_path),
+        output_dir=Path("data/pipeline_legacy"),
+        detector_threshold=DETECTOR_THRESHOLD,
+        camera_samples_per_scene=3,
+        ocr_samples_per_sec=0.0,
+    )
+    meta = probe_video(config.video_path)
+    scenes, _, frame_index = extract_scenes_and_frames(config, meta)
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    legacy_rows = []
+    for row in frame_index[frame_index["sample_role"] == "camera"].itertuples(index=False):
+        scene_id = int(getattr(row, "scene_id"))
+        frame_number = int(getattr(row, "frame_number"))
+        legacy_name = OUTPUT_DIR / f"scene_{scene_id}_frame_{frame_number}.jpg"
+        src = Path(getattr(row, "frame_path"))
+        if src.resolve() != legacy_name.resolve():
+            legacy_name.write_bytes(src.read_bytes())
+        image_idx = 0
+        camera_frames = frame_index[
+            (frame_index["scene_id"] == scene_id) & (frame_index["sample_role"] == "camera")
+        ].sort_values("frame_number")["frame_number"].tolist()
+        if frame_number in camera_frames:
+            image_idx = camera_frames.index(frame_number)
+        legacy_rows.append(
+            {
+                "scene_id": scene_id,
+                "image_idx": image_idx,
+                "frame_number": frame_number,
+                "frame_path": str(legacy_name),
+                "timecode": getattr(row, "timecode"),
+                "seconds": float(getattr(row, "seconds")),
+                "height": int(getattr(row, "height")),
+                "width": int(getattr(row, "width")),
+            }
+        )
 
-    video, scene_list = detect_scenes(video_path)
-    targets = build_targets(scene_list)
-    rows = extract_frames(video, targets)
+    import pandas as pd
 
-    df_scene_samples = pd.DataFrame(rows).sort_values(["scene_id", "image_idx"])
+    df_scene_samples = pd.DataFrame(legacy_rows).sort_values(["scene_id", "image_idx"])
     df_scene_samples.to_csv(CSV_PATH, index=False)
+    save_video_meta(meta, config.output_dir / "video_meta.json")
+    save_scenes(scenes, config.output_dir / "scenes.json")
     print(f"Saved {len(df_scene_samples)} scene samples to {OUTPUT_DIR}")
     print(f"Wrote metadata to {CSV_PATH}")
 

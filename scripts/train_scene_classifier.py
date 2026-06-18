@@ -13,11 +13,11 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from src.camera_assignemnt.approach_1.classifier import (
+from src.camera_assignemnt.scene_classifier.classifier import (
     load_classification_dataset,
     train_from_classification_dir,
 )
-from src.camera_assignemnt.approach_1.config import Config
+from src.camera_assignemnt.scene_classifier.config import Config
 
 
 def _print_cv_summary(results: dict) -> None:

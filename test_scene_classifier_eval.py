@@ -22,11 +22,11 @@ ROOT = Path(__file__).resolve().parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from src.camera_assignemnt.approach_1.classifier import (  # noqa: E402
+from src.camera_assignemnt.scene_classifier.classifier import (  # noqa: E402
     _load_cached_scene_mlp,
     classify_scene,
 )
-from src.camera_assignemnt.approach_1.config import Config  # noqa: E402
+from src.camera_assignemnt.scene_classifier.config import Config  # noqa: E402
 
 DEFAULT_GT_CSV = ROOT / "data" / "GT_scene_samples.csv"
 DEFAULT_OUTPUT = ROOT / "data" / "evaluation" / "scene_classifier_eval.json"

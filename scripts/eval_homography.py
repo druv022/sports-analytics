@@ -17,15 +17,15 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from src.camera_assignemnt.approach_2.rectangle_detector import load_image  # noqa: E402
-from src.camera_assignemnt.approach_3.config import HomographyConfig  # noqa: E402
-from src.camera_assignemnt.approach_3.homography_projector import (  # noqa: E402
+from src.camera_assignemnt.rectangle_mapper.rectangle_detector import load_image  # noqa: E402
+from src.camera_assignemnt.homography.config import HomographyConfig  # noqa: E402
+from src.camera_assignemnt.homography.homography_projector import (  # noqa: E402
     draw_backprojected_lines,
     estimate_homography,
     map_scene_to_reference,
     stack_overlays_on_reference,
 )
-from src.camera_assignemnt.approach_3.keypoint_detector import (  # noqa: E402
+from src.camera_assignemnt.homography.keypoint_detector import (  # noqa: E402
     detect_court_keypoints,
     draw_detected_keypoints,
 )

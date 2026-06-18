@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from src.camera_assignemnt.approach_1.config import Config
+from src.camera_assignemnt.scene_classifier.config import Config
 
 
 @pytest.fixture
