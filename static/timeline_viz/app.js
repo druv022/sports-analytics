@@ -463,7 +463,6 @@ function renderSummary() {
   if (s.duration_sec) parts.push(`Duration: ${formatDurationSecMs(s.duration_sec)}`);
   if (s.n_cameras) parts.push(`Cameras: ${s.n_cameras}`);
   if (s.n_ocr_frames) parts.push(`OCR frames: ${s.n_ocr_frames}`);
-  if (s.output_dir) parts.push(`Output: ${s.output_dir}`);
   els.summary.textContent = parts.length ? parts.join(" · ") : "No pipeline summary available.";
 }
 
