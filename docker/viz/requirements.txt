@@ -1,0 +1,9 @@
+# Timeline viz runtime (no pipeline training deps: torch, scenedetect, matplotlib).
+fastapi>=0.100
+uvicorn[standard]>=0.30
+onnxruntime>=1.17
+opencv-python-headless>=4.13.0.92
+pandas>=3.0.3
+numpy
+scipy>=1.11
+scikit-learn>=1.3

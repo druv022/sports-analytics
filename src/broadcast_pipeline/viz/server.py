@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import FastAPI, File, HTTPException, Query, UploadFile
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -16,6 +16,7 @@ from broadcast_pipeline.viz.camera_collage import (
     load_camera_collage_bundle,
     scene_entry_to_dict,
 )
+from broadcast_pipeline.viz.frame_paths import resolve_frame_under_output
 from broadcast_pipeline.viz.camera_compare import (
     SceneSelection,
     _scene_ids_for_cameras,
@@ -29,7 +30,11 @@ from broadcast_pipeline.viz.appearance_loader import (
     scene_row_to_dict,
 )
 from broadcast_pipeline.viz.data_loader import TimelineBundle, TimelineLoadError, load_timeline_bundle
-from broadcast_pipeline.viz.ocr_api import run_ocr_on_bytes
+from broadcast_pipeline.viz.pipeline_ocr import (
+    PipelineOcrIndex,
+    PipelineOcrLoadError,
+    load_pipeline_ocr_index,
+)
 
 
 class CompareSelection(BaseModel):
@@ -89,6 +94,10 @@ _TIMELINE_BUNDLE_ARTIFACTS = (
     "frame_assignments.csv",
     "frame_text_associated.csv",
 )
+_PIPELINE_OCR_ARTIFACTS = (
+    "frame_ocr.csv",
+    "frame_text_associated.csv",
+)
 
 
 def create_app(output_dir: Path, static_dir: Path) -> FastAPI:
@@ -98,6 +107,8 @@ def create_app(output_dir: Path, static_dir: Path) -> FastAPI:
     camera_bundle: CameraCollageBundle | None = None
     camera_bundle_fingerprint: str | None = None
     appearance_bundle: AppearanceBundle | None = None
+    pipeline_ocr: PipelineOcrIndex | None = None
+    pipeline_ocr_fingerprint: str | None = None
 
     app.add_middleware(
         CORSMiddleware,
@@ -149,6 +160,17 @@ def create_app(output_dir: Path, static_dir: Path) -> FastAPI:
         if appearance_bundle is None:
             appearance_bundle = load_appearance_bundle(output_dir)
         return appearance_bundle
+
+    def get_pipeline_ocr() -> PipelineOcrIndex:
+        nonlocal pipeline_ocr, pipeline_ocr_fingerprint
+        fingerprint = _artifact_fingerprint(output_dir, _PIPELINE_OCR_ARTIFACTS)
+        if pipeline_ocr is None or pipeline_ocr_fingerprint != fingerprint:
+            try:
+                pipeline_ocr = load_pipeline_ocr_index(output_dir)
+            except PipelineOcrLoadError as exc:
+                raise HTTPException(status_code=503, detail=str(exc)) from exc
+            pipeline_ocr_fingerprint = fingerprint
+        return pipeline_ocr
 
     def _resolve_camera_frame_path(frame_number: int) -> Path:
         appearance = get_appearance_bundle()
@@ -205,9 +227,9 @@ def create_app(output_dir: Path, static_dir: Path) -> FastAPI:
             raise HTTPException(status_code=500, detail=f"Segmentation failed: {exc}") from exc
 
     def _guard_output_path(path: Path, output_root: Path) -> Path:
-        resolved = path.resolve()
+        resolved = resolve_frame_under_output(path, output_root)
         try:
-            resolved.relative_to(output_root)
+            resolved.relative_to(output_root.resolve())
         except ValueError as exc:
             raise HTTPException(status_code=403, detail="Invalid frame path") from exc
         if not resolved.is_file():
@@ -337,27 +359,13 @@ def create_app(output_dir: Path, static_dir: Path) -> FastAPI:
     def api_frame(frame_number: int) -> FileResponse:
         return FileResponse(_resolve_frame_path(frame_number))
 
-    @app.get("/api/ocr/frame/{frame_number}")
-    def api_ocr_frame(frame_number: int) -> dict:
-        path = _resolve_frame_path(frame_number)
+    @app.get("/api/pipeline/ocr/{frame_number}")
+    def api_pipeline_ocr_frame(frame_number: int) -> dict:
+        data = get_pipeline_ocr()
         try:
-            return run_ocr_on_bytes(path.read_bytes())
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        except Exception as exc:
-            raise HTTPException(status_code=500, detail=f"OCR failed: {exc}") from exc
-
-    @app.post("/api/ocr")
-    async def api_ocr(file: UploadFile = File(...)) -> dict:
-        content = await file.read()
-        if not content:
-            raise HTTPException(status_code=400, detail="Empty upload")
-        try:
-            return run_ocr_on_bytes(content)
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        except Exception as exc:
-            raise HTTPException(status_code=500, detail=f"OCR failed: {exc}") from exc
+            return data.frame_payload(frame_number)
+        except PipelineOcrLoadError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     @app.get("/api/appearance")
     def api_appearance() -> dict:

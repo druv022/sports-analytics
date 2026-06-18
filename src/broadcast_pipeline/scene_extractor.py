@@ -9,6 +9,7 @@ from scenedetect import ContentDetector, SceneManager, open_video
 
 from broadcast_pipeline.config import PipelineConfig
 from broadcast_pipeline.progress import ProgressTracker, log_info
+from broadcast_pipeline.scenes_io import load_scenes
 from broadcast_pipeline.types import FrameRecord, Scene, VideoMeta
 
 
@@ -178,17 +179,3 @@ def save_scenes(scenes: list[Scene], path: Path) -> None:
         for s in scenes
     ]
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-
-
-def load_scenes(path: Path) -> list[Scene]:
-    data = json.loads(path.read_text(encoding="utf-8"))
-    return [
-        Scene(
-            scene_id=int(item["scene_id"]),
-            start_frame=int(item["start_frame"]),
-            end_frame=int(item["end_frame"]),
-            start_sec=float(item["start_sec"]),
-            end_sec=float(item["end_sec"]),
-        )
-        for item in data
-    ]

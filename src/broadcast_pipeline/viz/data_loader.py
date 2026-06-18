@@ -8,6 +8,7 @@ import pandas as pd
 
 from broadcast_pipeline.config import PipelineConfig
 from broadcast_pipeline.text_reference import _normalize_approved
+from broadcast_pipeline.viz.frame_paths import resolve_frame_under_output
 from broadcast_pipeline.viz.frame_ranges import parse_frame_ranges
 
 
@@ -211,9 +212,7 @@ def _load_frame_lookup(
     lookup: dict[int, FrameInfo] = {}
     for row in ocr_frames.itertuples(index=False):
         frame_number = int(row.frame_number)
-        path = Path(str(row.frame_path))
-        if not path.is_absolute():
-            path = (output_dir / path).resolve()
+        path = resolve_frame_under_output(Path(str(row.frame_path)), output_dir)
         assign = assign_lookup.get(frame_number, {})
         lookup[frame_number] = FrameInfo(
             frame_number=frame_number,

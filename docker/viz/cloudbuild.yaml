@@ -1,0 +1,42 @@
+# Builds a linux/amd64 image on Google Cloud (required for Cloud Run when
+# developing on Apple Silicon).
+#
+# Submit from repo root:
+#   gcloud builds submit \
+#     --project porfolio-demos \
+#     --config docker/viz/cloudbuild.yaml \
+#     --substitutions=_PIPELINE_SRC=data/pipeline
+#
+# Then deploy:
+#   gcloud run deploy timeline-viz \
+#     --project porfolio-demos \
+#     --image us-central1-docker.pkg.dev/porfolio-demos/timeline-viz/timeline-viz:latest \
+#     --region us-central1 \
+#     --port 8080 \
+#     --memory 2Gi \
+#     --cpu 2 \
+#     --timeout 300 \
+#     --allow-unauthenticated
+
+substitutions:
+  _PIPELINE_SRC: data/pipeline
+  _IMAGE: us-central1-docker.pkg.dev/porfolio-demos/timeline-viz/timeline-viz:latest
+
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -f
+      - docker/viz/Dockerfile
+      - --build-arg
+      - PIPELINE_SRC=${_PIPELINE_SRC}
+      - -t
+      - ${_IMAGE}
+      - .
+
+images:
+  - ${_IMAGE}
+
+options:
+  machineType: E2_HIGHCPU_8
+  logging: CLOUD_LOGGING_ONLY

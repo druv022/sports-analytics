@@ -7,7 +7,6 @@ const state = {
   detailFrames: [],
   detailFrameDetails: [],
   activeFrame: null,
-  ocrImage: null,
   suppressSuggestions: false,
   detailView: {
     image: null,
@@ -51,10 +50,6 @@ const els = {
   detailZoomReset: document.getElementById("detail-zoom-reset"),
   detailZoomLabel: document.getElementById("detail-zoom-label"),
   frameList: document.getElementById("frame-list"),
-  ocrFile: document.getElementById("ocr-file"),
-  ocrRun: document.getElementById("ocr-run"),
-  ocrStatus: document.getElementById("ocr-status"),
-  ocrCanvas: document.getElementById("ocr-canvas"),
   filterCamera: document.getElementById("filter-camera"),
   filterText: document.getElementById("filter-text"),
   filterKind: document.getElementById("filter-kind"),
@@ -655,24 +650,17 @@ function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
 }
 
-function detectionMatchesText(det, text) {
-  if (!text) return false;
-  const detText = foldCase(det.text);
-  const target = foldCase(text);
-  if (detText === target) return true;
-  if (detText.includes(target) || target.includes(detText)) return true;
-  const detWords = detText.split(/\s+/);
-  const targetWords = target.split(/\s+/);
-  return detWords.some((word) =>
-    targetWords.some((part) => word.includes(part) || part.includes(word)),
-  );
-}
-
 function detectionMatchesRow(det, row) {
-  if (!row) return false;
-  const targets = [row.text, row.mapped_complete_text].filter(Boolean);
-  if (!targets.length) return false;
-  return targets.some((target) => detectionMatchesText(det, target));
+  if (!row || !det) return false;
+  const mapped = foldCase(row.mapped_complete_text || "");
+  const rowText = foldCase(row.text || "");
+  const detMapped = foldCase(det.mapped_complete_text || "");
+  if (mapped && detMapped && detMapped !== mapped) return false;
+  if (!rowText) return Boolean(detMapped || det.text);
+  if (rowText === detMapped) return true;
+  if (rowText === foldCase(det.text)) return true;
+  if (rowText === foldCase(det.ocr_raw_text)) return true;
+  return false;
 }
 
 function filterDetectionsForRow(detections, row) {
@@ -680,17 +668,8 @@ function filterDetectionsForRow(detections, row) {
   return detections.filter((det) => detectionMatchesRow(det, row));
 }
 
-function filterDetectionsForText(detections, text) {
-  if (!text || !detections?.length) return [];
-  return detections.filter((det) => detectionMatchesText(det, text));
-}
-
-function annotateEnrichedDetections(detections, associatedText) {
-  const to = associatedText || "";
-  return detections.map((det) => ({
-    ...det,
-    displayText: to ? `${det.text} → ${to}` : det.text,
-  }));
+function detectionLabel(det) {
+  return det.display_text ?? det.displayText ?? det.text ?? "";
 }
 
 function resetDetailZoom() {
@@ -837,54 +816,31 @@ async function showFramePreview(frameNumber) {
 
   try {
     const img = await loadImage(`/api/frames/${frameNumber}`);
-    els.detailOcrStatus.textContent = "Running OCR…";
+    els.detailOcrStatus.textContent = "Loading pipeline OCR…";
 
-    const ocrRes = await fetch(`/api/ocr/frame/${frameNumber}`);
+    const ocrRes = await fetch(`/api/pipeline/ocr/${frameNumber}`);
     const payload = await ocrRes.json();
     if (!ocrRes.ok) throw new Error(payload.detail || ocrRes.statusText);
 
     const label = state.selectedRow?.text || state.selectedRow?.mapped_complete_text || "text";
-    const frameDetail = frameDetailFor(frameNumber);
-    let matched = filterDetectionsForRow(payload.detections || [], state.selectedRow);
-    let enrichedHighlight = false;
-
-    if (
-      !matched.length &&
-      frameDetail?.enrich_applied &&
-      frameDetail.ocr_raw_text
-    ) {
-      const rawMatches = filterDetectionsForText(
-        payload.detections || [],
-        frameDetail.ocr_raw_text,
-      );
-      if (rawMatches.length) {
-        matched = annotateEnrichedDetections(
-          rawMatches,
-          frameDetail.associated_text || label,
-        );
-        enrichedHighlight = true;
-      }
-    }
+    const matched = filterDetectionsForRow(payload.detections || [], state.selectedRow);
 
     state.detailView.image = img;
     state.detailView.detections = matched;
     resetDetailZoom();
     renderDetailCanvas();
 
-    if (matched.length && enrichedHighlight) {
-      const from = frameDetail.ocr_raw_text || "—";
-      const to = frameDetail.associated_text || label;
-      els.detailOcrStatus.textContent =
-        `Highlighted "${from} → ${to}" (enriched) · Live OCR: no ${label} match`;
-    } else if (matched.length) {
-      els.detailOcrStatus.textContent = `Highlighted "${label}" · ${matched.length} match(es)`;
-    } else if (frameDetail?.enrich_applied) {
-      const from = frameDetail.ocr_raw_text || "—";
-      const to = frameDetail.associated_text || label;
-      els.detailOcrStatus.textContent =
-        `Pipeline: ${from} → ${to} (enriched) · Live OCR: no ${label} match`;
+    if (matched.length) {
+      const labels = [...new Set(matched.map((det) => detectionLabel(det)))];
+      const preview = labels.slice(0, 2).join(", ");
+      const suffix = labels.length > 2 ? ` +${labels.length - 2} more` : "";
+      const enriched = matched.some((det) => det.enrich_applied);
+      const source = payload.source || "frame_ocr.csv";
+      els.detailOcrStatus.textContent = enriched
+        ? `Pipeline OCR (${source}): ${preview}${suffix} (enriched)`
+        : `Pipeline OCR (${source}): ${preview}${suffix}`;
     } else {
-      els.detailOcrStatus.textContent = `No OCR match for "${label}" on this frame`;
+      els.detailOcrStatus.textContent = `No stored OCR match for "${label}" on this frame`;
     }
     els.detailOcrStatus.classList.remove("error");
   } catch (err) {
@@ -933,10 +889,14 @@ function drawOcrOverlay(ctx, detections, scale, options = {}) {
     ctx.globalAlpha = 1;
     ctx.strokeRect(x0, y0, x1 - x0, y1 - y0);
 
-    const labelText = det.displayText ?? det.text;
-    const label = showConfidence
-      ? `${labelText} (${det.confidence.toFixed(2)})`
-      : labelText;
+    const labelText = detectionLabel(det);
+    const confLabel =
+      det.mapped_complete_text != null && det.mapping_confidence != null
+        ? `map ${Number(det.mapping_confidence).toFixed(2)}`
+        : det.confidence != null
+          ? Number(det.confidence).toFixed(2)
+          : null;
+    const label = showConfidence && confLabel != null ? `${labelText} (${confLabel})` : labelText;
     ctx.font = "14px system-ui, sans-serif";
     const metrics = ctx.measureText(label);
     const pad = 4;
@@ -949,46 +909,6 @@ function drawOcrOverlay(ctx, detections, scale, options = {}) {
     ctx.fillStyle = color;
     ctx.fillText(label, lx + pad, ly + boxH - 5);
   });
-}
-
-function drawOcrImage(canvas, image, detections, options = {}) {
-  const ctx = canvas.getContext("2d");
-  const wrap = canvas.parentElement;
-  const maxWidth = options.maxWidth || wrap?.clientWidth || 960;
-  const scale = Math.min(1, maxWidth / image.width);
-  canvas.width = Math.round(image.width * scale);
-  canvas.height = Math.round(image.height * scale);
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-  ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
-  if (detections && detections.length) {
-    drawOcrOverlay(ctx, detections, scale);
-  }
-}
-
-async function runOcr() {
-  if (!state.ocrImage) return;
-  els.ocrStatus.textContent = "Running OCR…";
-  els.ocrRun.disabled = true;
-
-  const form = new FormData();
-  form.append("file", state.ocrImage);
-
-  try {
-    const res = await fetch("/api/ocr", { method: "POST", body: form });
-    const payload = await res.json();
-    if (!res.ok) throw new Error(payload.detail || res.statusText);
-
-    const img = await loadImage(URL.createObjectURL(state.ocrImage));
-    drawOcrImage(els.ocrCanvas, img, payload.detections || []);
-
-    els.ocrStatus.textContent = `${payload.verdict} · ${payload.detections.length} detection(s)`;
-    els.ocrStatus.classList.remove("error");
-  } catch (err) {
-    els.ocrStatus.textContent = `OCR failed: ${err.message}`;
-    els.ocrStatus.classList.add("error");
-  } finally {
-    els.ocrRun.disabled = false;
-  }
 }
 
 function setupFilterControls() {
@@ -1084,20 +1004,6 @@ async function init() {
   els.suggestions.addEventListener("click", (event) => {
     event.stopPropagation();
   });
-
-  els.ocrFile.addEventListener("change", () => {
-    const file = els.ocrFile.files?.[0];
-    state.ocrImage = file || null;
-    els.ocrRun.disabled = !file;
-    els.ocrStatus.textContent = file ? file.name : "";
-    if (file) {
-      loadImage(URL.createObjectURL(file)).then((img) => {
-        drawOcrImage(els.ocrCanvas, img, null);
-      });
-    }
-  });
-
-  els.ocrRun.addEventListener("click", runOcr);
 
   setupDetailZoomControls();
   updateDetailZoomLabel();

@@ -7,8 +7,9 @@ from typing import Literal
 import pandas as pd
 
 from broadcast_pipeline.config import PipelineConfig
-from broadcast_pipeline.scene_extractor import load_scenes
+from broadcast_pipeline.scenes_io import load_scenes
 from broadcast_pipeline.viz.camera_compare import parse_vote_counts
+from broadcast_pipeline.viz.frame_paths import resolve_frame_under_output
 
 SlotName = Literal["begin", "mid", "end"]
 
@@ -81,9 +82,7 @@ def pick_scene_slots(
         if frame_number in seen_frames:
             continue
         seen_frames.add(frame_number)
-        path = Path(str(row["frame_path"]))
-        if not path.is_absolute():
-            path = (output_dir / path).resolve()
+        path = resolve_frame_under_output(Path(str(row["frame_path"])), output_dir)
         slots.append(
             SceneFrameSlot(
                 slot=name,

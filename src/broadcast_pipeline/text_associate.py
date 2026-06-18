@@ -24,16 +24,26 @@ def _lcs_length(a: str, b: str) -> int:
     return prev[-1]
 
 
-def _is_subsequence(needle: str, haystack: str) -> bool:
-    if not needle:
-        return True
-    i = 0
-    for ch in haystack:
-        if ch == needle[i]:
-            i += 1
-            if i == len(needle):
-                return True
-    return False
+def _longest_common_substring(partial: str, reference: str) -> tuple[int, int]:
+    """Return length and 0-based start index in reference for the longest contiguous match."""
+    if not partial or not reference:
+        return 0, -1
+
+    best_len = 0
+    best_ref_start = -1
+    prev = [0] * (len(reference) + 1)
+    for i in range(1, len(partial) + 1):
+        curr = [0] * (len(reference) + 1)
+        for j in range(1, len(reference) + 1):
+            if partial[i - 1] == reference[j - 1]:
+                curr[j] = prev[j - 1] + 1
+                if curr[j] > best_len:
+                    best_len = curr[j]
+                    best_ref_start = j - curr[j]
+            else:
+                curr[j] = 0
+        prev = curr
+    return best_len, best_ref_start
 
 
 def _approved_complete_texts(reference: pd.DataFrame) -> list[str]:
@@ -59,22 +69,38 @@ def _reference_has_text(reference: pd.DataFrame, token: str) -> bool:
 def _best_complete_match(
     partial: str,
     candidates: list[str],
-    min_score: float,
-    min_match_chars: int = 3,
+    *,
+    min_match_chars: int,
+    min_reference_coverage: float,
+    min_prefix_coverage: float,
+    min_token_coverage: float,
 ) -> tuple[str | None, float]:
     best_text: str | None = None
     best_score = 0.0
     partial_fold = partial.casefold()
+    partial_len = len(partial_fold)
+
     for candidate in candidates:
         cand_fold = candidate.casefold()
-        lcs = _lcs_length(partial_fold, cand_fold)
-        if lcs < min_match_chars:
+        block_len, ref_start = _longest_common_substring(partial_fold, cand_fold)
+        if block_len < min_match_chars:
             continue
-        score = lcs / max(len(partial_fold), len(cand_fold), 1)
-        if score > best_score:
-            best_score = score
+
+        if block_len / partial_len < min_token_coverage:
+            continue
+
+        ref_coverage = block_len / len(cand_fold)
+        threshold = (
+            min_prefix_coverage if ref_start == 0 else min_reference_coverage
+        )
+        if ref_coverage < threshold:
+            continue
+
+        if ref_coverage > best_score:
+            best_score = ref_coverage
             best_text = candidate
-    if best_text is None or best_score < min_score:
+
+    if best_text is None:
         return None, best_score
     return best_text, best_score
 
@@ -235,8 +261,10 @@ def associate_text(
             mapped, confidence = _best_complete_match(
                 token,
                 approved,
-                config.association_min_score,
-                config.association_min_match_chars,
+                min_match_chars=config.association_min_match_chars,
+                min_reference_coverage=config.association_min_reference_coverage,
+                min_prefix_coverage=config.association_min_prefix_coverage,
+                min_token_coverage=config.association_min_token_coverage,
             )
             if mapped is not None:
                 associated_rows.append(

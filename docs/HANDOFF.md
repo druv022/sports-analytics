@@ -1,6 +1,6 @@
 # Broadcast Pipeline — Final Handoff Document
 
-This document explains the broadcast video processing pipeline from end to end: what problem it solves, how data flows through each stage, why the major design choices were made, and how to run, tune, and debug the system. It is written for humans taking over the project — engineers, reviewers, and operators — not as machine-readable context.
+This document explains the broadcast video processing pipeline from end to end: what problem it solves, how data flows through each stage, why the major design choices were made, and how to run, tune, and debug the system.
 
 For a hands-on walkthrough with runnable cells, see [notebooks/broadcast_pipeline_colab_guide.ipynb](../notebooks/broadcast_pipeline_colab_guide.ipynb).
 
@@ -51,7 +51,7 @@ When you invoke `python main.py` with no extra flags, the orchestrator executes 
 
 **ocr** runs RapidOCR on OCR-role frames with CLAHE upscaling, gating unread overlay regions to the `UNK` token unless `--enable-vlm` is set. **reference** merges newly discovered OCR tokens into `approved_text_reference.csv`, auto-approving new rows by default so association has targets on the first pass. **enrich** stabilizes flickering score-bug detections across contiguous camera runs inside each scene before **associate** maps tokens to approved reference strings using exact match or LCS partial match. **aggregate** rolls frame-level associations into per-camera text timelines with durations and frame ranges, writing `aggregated_complete.csv`, `aggregated_partial.csv`, and `pipeline_summary.json` as the primary deliverables.
 
-The default run therefore optimizes for **accuracy over speed**: ensemble camera clustering, appearance-gated close-up reconciliation, 2 Hz OCR sampling, and temporal enrichment are all enabled without any CLI flags. Operators who need faster iteration on CPU can pass `--fast-cameras` to swap embedding clustering for HSV histograms, or reduce `--ocr-samples-per-sec` to cut OCR cost.
+The default run therefore optimizes for **accuracy over speed**: ensemble camera clustering, appearance-gated close-up reconciliation, OCR sampling, and temporal enrichment are all enabled without any CLI flags. Operators who need faster iteration on CPU can pass `--fast-cameras` to swap embedding clustering for HSV histograms, or reduce `--ocr-samples-per-sec` to cut OCR cost.
 
 ### Runtime profiles
 
@@ -104,7 +104,7 @@ The pipeline was designed for **tennis (or similar court-sport) broadcasts** whe
 
 **Homography / 2D→3D court reconstruction.** Code exists under `src/camera_assignemnt/homography/` for court mapping and evaluation (`scripts/eval_homography.py`). This path is **out of scope** for `run_pipeline()` — it does not feed camera ID or OCR in the current workflow.
 
-**What we shipped instead:** global visual embeddings (ResNet50 + DINOv2) clustered with DBSCAN/HDBSCAN, with an HSV fast path for CPU-only runs. Embeddings work on close-ups because background lighting, crowd color, and framing differ by camera position even when no court is visible.
+**What we shipped instead:** global visual embeddings (ResNet50 + DINOv2) clustered with HDBSCAN, with an HSV fast path for CPU-only runs. Embeddings work on close-ups because background lighting, crowd color, and framing differ by camera position even when no court is visible.
 
 ---
 
@@ -122,7 +122,7 @@ Each decision below uses the same structure: what we chose, what we rejected, wh
 
 **Why:** Long videos and ML-heavy stages crash or timeout. Writing artifacts after each stage lets you resume (`--resume`), re-run from a midpoint (`--from-step`), inspect intermediate results, and edit the reference CSV between stages.
 
-**Trade-offs:** More disk usage (many JPEGs and large CSVs). Operators must understand artifact dependencies.
+**Trade-offs:** More disk usage (many JPEGs and large CSVs).
 
 **Where:** `src/broadcast_pipeline/orchestrator.py`, `src/broadcast_pipeline/artifacts.py`, `src/broadcast_pipeline/config.py` (`artifact()` registry)
 
@@ -289,15 +289,15 @@ A single physical frame can appear twice in `frame_index.csv` with different `sa
 
 ---
 
-### D13 — LCS association (not edit distance)
+### D13 — Contiguous substring association (not LCS / edit distance)
 
-**Decision:** Map partial OCR tokens to approved reference strings using longest-common-subsequence (LCS) score, minimum 0.6, minimum 3 matching characters.
+**Decision:** Map partial OCR tokens to approved reference strings using the **longest contiguous common substring**, minimum 3 characters, plus **reference-coverage** gates (0.6 non-prefix, 0.5 prefix) and a **token-coverage** gate (matched block must cover at least half the OCR token).
 
-**Alternatives considered:** Levenshtein edit distance.
+**Alternatives considered:** LCS subsequence scoring (rejected — `SCAVE`→`CHASE` false positives); Levenshtein edit distance.
 
-**Why:** Partial scoreboard crops often show suffixes or prefixes of the full string. LCS handles subsequence overlap better than character edits on noisy OCR.
+**Why:** Sponsor and scorebug crops are usually substring-like (`CHASEO`, `GAM`). Contiguous matching blocks scattered-letter overlaps; token coverage blocks long unrelated strings that share a short prefix with a short sponsor (`CHAMPIONSHIP`→`CHASE`).
 
-**Trade-offs:** Short tokens can false-match if the reference catalog is large. Tune `association_min_score` and review `dropped_text.csv`.
+**Trade-offs:** Logo garble like `CHAMO`→`CHASE` can still pass at the 0.6 reference floor. Heavily garbled short tokens near 50% overlap may be dropped. Tune coverage thresholds and review `dropped_text.csv`.
 
 **Where:** `src/broadcast_pipeline/text_associate.py`
 
@@ -348,11 +348,11 @@ flowchart TD
 
 ## 4. Pipeline walkthrough
 
-Each subsection follows the same structure: purpose, inputs, what happens, outputs, defaults (with intuition for why those values exist), operational notes, and module path. Together they describe the **current** implementation as wired in `orchestrator.py`; if code and this document disagree, trust the code and update this file.
+Each subsection follows the same structure: purpose, inputs, what happens, outputs, defaults (with intuition for why those values exist), operational notes, and module path. Together they describe the **current** implementation as wired in `orchestrator.py`.
 
 ### Resume and partial-run behavior (applies to all stages)
 
-With `--resume`, a stage is skipped when its primary output artifact already exists on disk. OCR and enrich use **completeness checks** rather than mere file presence: OCR skips only when every expected `(scene_id, frame_number)` key from `frame_index.csv` appears in `frame_ocr.csv`, and enrich skips only when enriched row count matches raw OCR row count. The **reference** stage always runs when reached, because new OCR tokens may have appeared since the last catalog update. Camera assignment is skipped when both `scene_assignments.csv` and `frame_assignments.csv` exist — if you change clustering code or tuning weights, delete those files or run `--from-step cameras` without expecting a silent refresh under `--resume`. `--from-step` and `--to-step` select an inclusive slice of `STAGE_ORDER`; when `--from-step` is not `all`, `validate_stage_inputs()` verifies upstream artifacts exist before the run starts.
+With `--resume`, a stage is skipped when its primary output artifact already exists on disk. OCR and enrich use **completeness checks** rather than mere file presence: OCR skips only when every expected `(scene_id, frame_number)` key from `frame_index.csv` appears in `frame_ocr.csv`, and enrich skips only when enriched row count matches raw OCR row count. The **reference** stage always runs when reached, because new OCR tokens may have appeared since the last catalog update. Camera assignment is skipped when both `scene_assignments.csv` and `frame_assignments.csv` exist — if  clustering code or tuning weights change, delete those files or run `--from-step cameras` without expecting a silent refresh under `--resume`. `--from-step` and `--to-step` select an inclusive slice of `STAGE_ORDER`; when `--from-step` is not `all`, `validate_stage_inputs()` verifies upstream artifacts exist before the run starts.
 
 ---
 
@@ -402,7 +402,7 @@ With `--resume`, a stage is skipped when its primary output artifact already exi
 
 **What happens:**
 1. Run PySceneDetect `ContentDetector` with `detector_threshold` (default 27.0)
-2. For each scene, compute camera sample frames (evenly spaced, default 5) and OCR sample frames (default 2 Hz)
+2. For each scene, compute camera sample frames (evenly spaced, default 5) and OCR sample frames (default 2 frmes per sec)
 3. Single sequential video scan writes only needed JPEGs to `frames/scene_{id}_frame_{n}.jpg`
 4. Build `frame_index.csv` with one row per (scene, frame, role) — a frame can have both `camera` and `ocr` roles
 
@@ -622,14 +622,14 @@ With `--resume`, a stage is skipped when its primary output artifact already exi
 **What happens:**
 1. For each word in each frame:
    - **Complete** — exact match to approved reference → `text_kind=complete`
-   - **Partial** — LCS match above threshold → mapped to canonical `complete_text`
+   - **Partial** — longest contiguous substring + reference coverage gates → mapped to canonical `complete_text`
    - **Dropped** — UNK, unapproved, or no match → written to `dropped_text.csv` with reason
 
 **Outputs:**
 - `frame_text_associated.csv` — `scene_id`, `frame_number`, `camera_id`, `raw_text`, `text_kind`, `mapped_complete_text`, `mapping_confidence`, `readability_label`, `bbox_json`, `enrich_applied`, `ocr_raw_text`
 - `dropped_text.csv` — columns: `scene_id`, `frame_number`, `camera_id`, `raw_text`, `reason` (`unk_or_empty`, `unapproved`, `no_match`)
 
-**Key defaults:** `association_min_score=0.6`, `association_min_match_chars=3`
+**Key defaults:** `association_min_match_chars=3`, `association_min_reference_coverage=0.6`, `association_min_prefix_coverage=0.5`, `association_min_token_coverage=0.5`
 
 **Operational notes:** Skipped on `--resume` if both output CSVs exist. Review `dropped_text.csv` to tune reference or thresholds.
 
@@ -808,7 +808,7 @@ These `PipelineConfig` fields are **not** exposed on the CLI but matter for tuni
 | Camera stabilizers | `camera_merge_similarity_threshold`, `camera_min_vote_share` | Close-up over-segmentation or weak majorities |
 | Appearance | `appearance_enabled`, `appearance_color_tolerance` | Disable segmenter or relax kit matching |
 | OCR internals | `ocr_preprocess`, `ocr_gc_interval`, `unk_token` | Memory hygiene or custom UNK handling |
-| Text pipeline | `enrich_enabled`, `association_min_score`, `default_new_text_approved` | Stricter matching or manual reference curation |
+| Text pipeline | `enrich_enabled`, `association_min_reference_coverage`, `default_new_text_approved` | Stricter matching or manual reference curation |
 | Accelerator | `accelerator="auto"` | Force `"cpu"` on machines without working CUDA/MPS |
 | Debug | `persist_camera_debug`, `camera_vlm_collage_qa` | Disk savings or optional VLM QA on collages |
 
@@ -923,7 +923,9 @@ The table below lists the most impactful knobs when output quality diverges from
 | `camera_reconcile_reuse_labels` | True | Prefer pre-merge debug cluster IDs over minting new `cam_N` |
 | `appearance_color_tolerance` | 18.0 | Players with similar kits merged wrongly → lower; legitimate lighting variation rejected → raise |
 | `appearance_min_sequence_match` | 2 | Stricter kit matching → raise; missed compatible close-ups → lower |
-| `association_min_score` | 0.6 | Partial match strictness |
+| `association_min_reference_coverage` | 0.6 | Partial match strictness (non-prefix contiguous matches) |
+| `association_min_prefix_coverage` | 0.5 | Minimum reference coverage when match starts at index 0 |
+| `association_min_token_coverage` | 0.5 | Minimum fraction of OCR token covered by the contiguous match |
 | `enrich_region_iou` | 0.3 | Detection matching strictness across frames |
 | `enable_vlm` (CLI: `--enable-vlm`) | False | When UNK rate is unacceptable and API cost is acceptable |
 | `ocr_scale` (CLI: `--ocr-scale`) | 1.5 | Small text missed → raise; OOM → lower |
@@ -1019,8 +1021,10 @@ Defaults live in `src/broadcast_pipeline/config.py`. Values below match the data
 | `default_new_text_approved` | `True` | Auto-approves newly discovered OCR tokens so first-pass association can proceed; humans should review before production. |
 | `enrich_enabled` | `True` | Temporal OCR stabilization within camera runs is on by default because score bugs flicker frame-to-frame. |
 | `enrich_region_iou` | `0.3` | IoU threshold when matching detections across time during enrichment. |
-| `association_min_score` | `0.6` | Minimum LCS score for partial OCR → reference mapping. |
-| `association_min_match_chars` | `3` | Minimum matching characters for a partial association to count. |
+| `association_min_reference_coverage` | `0.6` | Minimum contiguous-match coverage of the reference string (non-prefix matches). |
+| `association_min_prefix_coverage` | `0.5` | Minimum reference coverage when the contiguous match is a prefix of the reference. |
+| `association_min_token_coverage` | `0.5` | Minimum `block_len / len(partial)` so long tokens cannot match on a short shared prefix. |
+| `association_min_match_chars` | `3` | Minimum length of the contiguous common substring for a partial association. |
 
 ### Glossary
 

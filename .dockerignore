@@ -1,0 +1,35 @@
+.git
+.gitignore
+.venv
+__pycache__
+*.py[cod]
+*.egg-info
+build
+dist
+wheels
+.idea
+.vscode
+.cursor
+graphify-out
+notebooks
+tests
+*.md
+!README.md
+.DS_Store
+.python-version
+uv.lock
+yolo11n-seg.pt
+*.pth
+*.joblib
+
+# Pipeline outputs are large — mount at runtime, or allow explicit bake paths below.
+data/*
+!data/pipeline_complete1/**
+!data/pipeline/**
+
+# Local model cache (rebuilt in Docker)
+models/*
+!models/.gitkeep
+
+# Keep docker build context lean
+docker/viz/__pycache__

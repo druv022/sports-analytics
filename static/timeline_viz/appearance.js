@@ -14,13 +14,9 @@ const appearanceState = {
     detections: [],
     storedFrame: null,
     zoom: 1,
-    panX: 0,
-    panY: 0,
     dragging: false,
     dragStartX: 0,
     dragStartY: 0,
-    panStartX: 0,
-    panStartY: 0,
   },
   filters: {
     status: "",
@@ -396,10 +392,19 @@ function clearAppearanceCanvas() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 }
 
+function appearanceBaseScale(image) {
+  const wrap = appearanceEl("appearance-canvas-wrap");
+  const fitWidth = wrap?.clientWidth || 960;
+  return fitWidth / image.width;
+}
+
 function resetAppearanceZoom() {
   appearanceState.view.zoom = 1;
-  appearanceState.view.panX = 0;
-  appearanceState.view.panY = 0;
+  const wrap = appearanceEl("appearance-canvas-wrap");
+  if (wrap) {
+    wrap.scrollLeft = 0;
+    wrap.scrollTop = 0;
+  }
   updateAppearanceZoomLabel();
 }
 
@@ -425,21 +430,17 @@ function renderAppearanceCanvas() {
     return;
   }
 
-  const { zoom, panX, panY, detections } = appearanceState.view;
-  const displayW = Math.max(1, Math.round(img.width * zoom));
-  const displayH = Math.max(1, Math.round(img.height * zoom));
+  const { zoom, detections } = appearanceState.view;
+  const scale = appearanceBaseScale(img) * zoom;
+  const displayW = Math.max(1, Math.round(img.width * scale));
+  const displayH = Math.max(1, Math.round(img.height * scale));
 
   canvas.width = displayW;
   canvas.height = displayH;
-  canvas.style.width = `${displayW}px`;
-  canvas.style.height = `${displayH}px`;
 
   const ctx = canvas.getContext("2d");
   ctx.clearRect(0, 0, displayW, displayH);
-  ctx.drawImage(img, panX, panY, displayW, displayH);
-
-  const scaleX = displayW / img.width;
-  const scaleY = displayH / img.height;
+  ctx.drawImage(img, 0, 0, displayW, displayH);
 
   detections.forEach((det) => {
     const color = COLOR_MAP[det.clothing_color] || COLOR_MAP.neutral;
@@ -450,8 +451,8 @@ function renderAppearanceCanvas() {
       if (!contour.length) return;
       ctx.beginPath();
       contour.forEach(([x, y], idx) => {
-        const px = x * scaleX + panX;
-        const py = y * scaleY + panY;
+        const px = x * scale;
+        const py = y * scale;
         if (idx === 0) ctx.moveTo(px, py);
         else ctx.lineTo(px, py);
       });
@@ -461,10 +462,10 @@ function renderAppearanceCanvas() {
     ctx.restore();
 
     const [x1, y1, x2, y2] = det.bbox;
-    const bx1 = x1 * scaleX + panX;
-    const by1 = y1 * scaleY + panY;
-    const bw = (x2 - x1) * scaleX;
-    const bh = (y2 - y1) * scaleY;
+    const bx1 = x1 * scale;
+    const by1 = y1 * scale;
+    const bw = (x2 - x1) * scale;
+    const bh = (y2 - y1) * scale;
     ctx.strokeStyle = color;
     ctx.lineWidth = 2;
     ctx.strokeRect(bx1, by1, bw, bh);
@@ -497,6 +498,7 @@ function setupAppearanceZoomControls() {
   wrap?.addEventListener(
     "wheel",
     (event) => {
+      if (!appearanceState.view.image) return;
       event.preventDefault();
       const factor = event.deltaY < 0 ? 1.1 : 1 / 1.1;
       setAppearanceZoom(appearanceState.view.zoom * factor);
@@ -506,24 +508,25 @@ function setupAppearanceZoomControls() {
   );
 
   wrap?.addEventListener("mousedown", (event) => {
+    if (event.button !== 0 || !appearanceState.view.image) return;
     appearanceState.view.dragging = true;
     appearanceState.view.dragStartX = event.clientX;
     appearanceState.view.dragStartY = event.clientY;
-    appearanceState.view.panStartX = appearanceState.view.panX;
-    appearanceState.view.panStartY = appearanceState.view.panY;
+    wrap.classList.add("dragging");
   });
 
   window.addEventListener("mousemove", (event) => {
-    if (!appearanceState.view.dragging) return;
-    appearanceState.view.panX =
-      appearanceState.view.panStartX + (event.clientX - appearanceState.view.dragStartX);
-    appearanceState.view.panY =
-      appearanceState.view.panStartY + (event.clientY - appearanceState.view.dragStartY);
-    renderAppearanceCanvas();
+    if (!appearanceState.view.dragging || !wrap) return;
+    wrap.scrollLeft -= event.clientX - appearanceState.view.dragStartX;
+    wrap.scrollTop -= event.clientY - appearanceState.view.dragStartY;
+    appearanceState.view.dragStartX = event.clientX;
+    appearanceState.view.dragStartY = event.clientY;
   });
 
   window.addEventListener("mouseup", () => {
+    if (!appearanceState.view.dragging) return;
     appearanceState.view.dragging = false;
+    wrap?.classList.remove("dragging");
   });
 }
 

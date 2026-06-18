@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -17,10 +18,14 @@ from broadcast_pipeline.viz.camera_collage import (
 )
 from broadcast_pipeline.viz.camera_collage_render import CollageRenderConfig, render_camera_collages
 from broadcast_pipeline.viz.data_loader import TimelineLoadError, load_timeline_bundle
+from broadcast_pipeline.viz.frame_paths import resolve_frame_under_output
 from broadcast_pipeline.viz.frame_ranges import parse_frame_ranges
 from broadcast_pipeline.viz.appearance_api import clear_segmenter_cache, run_appearance_on_bytes
 from broadcast_pipeline.viz.appearance_loader import load_appearance_bundle
-from broadcast_pipeline.viz.ocr_api import run_ocr_on_bytes
+from broadcast_pipeline.viz.pipeline_ocr import (
+    PipelineOcrLoadError,
+    load_pipeline_ocr_index,
+)
 from broadcast_pipeline.viz.server import create_app
 from src.camera_assignemnt.embedding_cluster.models import ClusterResult, PipelineOutput
 from src.person_appearance.segmenter import MockPersonSegmenter
@@ -52,10 +57,52 @@ def _write_fixture_bundle(tmp_path: Path) -> Path:
     (output_dir / "frame_text_associated.csv").write_text(
         "scene_id,frame_number,camera_id,raw_text,text_kind,mapped_complete_text,"
         "mapping_confidence,readability_label,bbox_json,enrich_applied,ocr_raw_text\n"
-        "0,10,cam_0,PLAYER,complete,PLAYER,1.0,good,[],false,\n"
-        "0,11,cam_0,PLA,partial,PLAYER,0.8,partial,[],false,\n",
+        "0,10,cam_0,PLAYER,complete,PLAYER,1.0,good,\"[10,10,100,40]\",false,\n"
+        "0,11,cam_0,PLA,partial,PLAYER,0.8,partial,\"[12,12,90,38]\",false,\n",
         encoding="utf-8",
     )
+    pd.DataFrame(
+        [
+            {
+                "scene_id": 0,
+                "frame_number": 10,
+                "seconds": 0.33,
+                "camera_id": "cam_0",
+                "words_json": json.dumps(["PLAYER"]),
+                "detections_json": json.dumps(
+                    [
+                        {
+                            "text": "PLAYER",
+                            "confidence": 0.95,
+                            "bbox": [10, 10, 100, 40],
+                            "source": "ocr",
+                        }
+                    ]
+                ),
+                "verdict": "readable",
+                "used_unk": False,
+            },
+            {
+                "scene_id": 0,
+                "frame_number": 11,
+                "seconds": 0.66,
+                "camera_id": "cam_0",
+                "words_json": json.dumps(["PLA"]),
+                "detections_json": json.dumps(
+                    [
+                        {
+                            "text": "PLA",
+                            "confidence": 0.72,
+                            "bbox": [12, 12, 90, 38],
+                            "source": "ocr",
+                        }
+                    ]
+                ),
+                "verdict": "readable",
+                "used_unk": False,
+            },
+        ]
+    ).to_csv(output_dir / "frame_ocr.csv", index=False)
     (output_dir / "approved_text_reference.csv").write_text(
         "complete_text,approved,first_seen_scene_id,first_seen_frame,discovery_count\n"
         "PLAYER,true,0,10,2\n"
@@ -271,29 +318,67 @@ def test_load_timeline_bundle_missing_raises(tmp_path):
         load_timeline_bundle(tmp_path / "missing")
 
 
-def test_run_ocr_on_bytes_invalid():
-    with pytest.raises(ValueError, match="decode"):
-        run_ocr_on_bytes(b"not-an-image")
+def test_build_frame_ocr_payload_joins_associations(tmp_path):
+    output_dir = _write_fixture_bundle(tmp_path)
+    index = load_pipeline_ocr_index(output_dir)
+    payload = index.frame_payload(10)
+
+    assert payload["frame_number"] == 10
+    assert payload["source"] == "frame_ocr.csv"
+    assert len(payload["detections"]) == 1
+    det = payload["detections"][0]
+    assert det["text"] == "PLAYER"
+    assert det["mapped_complete_text"] == "PLAYER"
+    assert det["display_text"] == "PLAYER"
+    assert det["bbox"] == [10, 10, 100, 40]
 
 
-def test_run_ocr_on_bytes_mocked():
-    fake_det = MagicMock()
-    fake_det.text = "DEUCE"
-    fake_det.confidence = 0.91
-    fake_det.bbox = np.array([1, 2, 10, 12], dtype=np.int32)
+def test_build_frame_ocr_payload_enriched_entry(tmp_path):
+    output_dir = _write_fixture_bundle(tmp_path)
+    assoc_path = output_dir / "frame_text_associated.csv"
+    assoc_path.write_text(
+        "scene_id,frame_number,camera_id,raw_text,text_kind,mapped_complete_text,"
+        "mapping_confidence,readability_label,bbox_json,enrich_applied,ocr_raw_text\n"
+        "0,10,cam_0,CHASE,complete,CHASE,1.0,partial,\"[50,50,80,60]\",true,CHASEO\n",
+        encoding="utf-8",
+    )
+    ocr_path = output_dir / "frame_ocr.csv"
+    pd.DataFrame(
+        [
+            {
+                "scene_id": 0,
+                "frame_number": 10,
+                "seconds": 0.33,
+                "camera_id": "cam_0",
+                "words_json": json.dumps(["CHASEO"]),
+                "detections_json": json.dumps(
+                    [
+                        {
+                            "text": "CHASEO",
+                            "confidence": 0.64,
+                            "bbox": [48, 48, 82, 62],
+                            "source": "ocr",
+                        }
+                    ]
+                ),
+                "verdict": "readable",
+                "used_unk": False,
+            }
+        ]
+    ).to_csv(ocr_path, index=False)
 
-    img = np.zeros((20, 30, 3), dtype=np.uint8)
-    ok, encoded = cv2.imencode(".jpg", img)
-    assert ok
+    payload = load_pipeline_ocr_index(output_dir).frame_payload(10)
+    assert len(payload["detections"]) == 1
+    det = payload["detections"][0]
+    assert det["text"] == "CHASEO"
+    assert det["mapped_complete_text"] == "CHASE"
+    assert det["display_text"] == "CHASEO → CHASE"
+    assert det["enrich_applied"] is True
 
-    with patch("broadcast_pipeline.viz.ocr_api.extract_detections", return_value=[fake_det]):
-        payload = run_ocr_on_bytes(encoded.tobytes())
 
-    assert payload["verdict"] == "readable"
-    assert payload["image_width"] == 30
-    assert payload["image_height"] == 20
-    assert payload["detections"][0]["text"] == "DEUCE"
-    assert payload["detections"][0]["bbox"] == [1, 2, 10, 12]
+def test_load_pipeline_ocr_index_missing_raises(tmp_path):
+    with pytest.raises(PipelineOcrLoadError):
+        load_pipeline_ocr_index(tmp_path / "missing")
 
 
 def test_api_search_and_row(tmp_path):
@@ -320,48 +405,22 @@ def test_api_search_and_row(tmp_path):
     res = client.get("/api/frames/10")
     assert res.status_code == 200
 
-    with patch("broadcast_pipeline.viz.server.run_ocr_on_bytes") as mock_ocr:
-        mock_ocr.return_value = {
-            "verdict": "readable",
-            "detections": [{"text": "PLAYER", "confidence": 0.9, "bbox": [0, 0, 5, 5]}],
-            "image_width": 48,
-            "image_height": 32,
-        }
-        res = client.get("/api/ocr/frame/10")
+    res = client.get("/api/pipeline/ocr/10")
     assert res.status_code == 200
-    assert res.json()["detections"][0]["text"] == "PLAYER"
+    data = res.json()
+    assert data["detections"][0]["text"] == "PLAYER"
+    assert data["detections"][0]["mapped_complete_text"] == "PLAYER"
 
 
-def test_api_ocr_mocked(tmp_path):
+def test_api_pipeline_ocr_missing_frame(tmp_path):
     output_dir = _write_fixture_bundle(tmp_path)
     static_dir = tmp_path / "static"
     static_dir.mkdir()
     app = create_app(output_dir, static_dir)
     client = TestClient(app)
 
-    fake_det = MagicMock()
-    fake_det.text = "SET"
-    fake_det.confidence = 0.88
-    fake_det.bbox = np.array([0, 0, 5, 5], dtype=np.int32)
-
-    img = np.zeros((10, 10, 3), dtype=np.uint8)
-    ok, encoded = cv2.imencode(".jpg", img)
-    assert ok
-
-    with patch("broadcast_pipeline.viz.server.run_ocr_on_bytes") as mock_ocr:
-        mock_ocr.return_value = {
-            "verdict": "readable",
-            "detections": [{"text": "SET", "confidence": 0.88, "bbox": [0, 0, 5, 5]}],
-            "image_width": 10,
-            "image_height": 10,
-        }
-        res = client.post(
-            "/api/ocr",
-            files={"file": ("frame.jpg", encoded.tobytes(), "image/jpeg")},
-        )
-
-    assert res.status_code == 200
-    assert res.json()["detections"][0]["text"] == "SET"
+    res = client.get("/api/pipeline/ocr/999")
+    assert res.status_code == 404
 
 
 def test_pick_scene_slots_full():
@@ -440,6 +499,36 @@ def test_api_camera_collage(tmp_path):
 
     res = client.get("/api/cameras/missing/scenes")
     assert res.status_code == 404
+
+
+def test_resolve_frame_under_output_host_absolute_path(tmp_path):
+    output_dir = tmp_path / "pipeline"
+    frames_dir = output_dir / "frames"
+    frames_dir.mkdir(parents=True)
+    image = frames_dir / "scene_0_frame_10.jpg"
+    image.write_bytes(b"jpg")
+
+    host_path = Path("/Users/example/project/data/pipeline/frames/scene_0_frame_10.jpg")
+    resolved = resolve_frame_under_output(host_path, output_dir)
+    assert resolved == image.resolve()
+
+
+def test_api_scene_images_remaps_host_absolute_paths(tmp_path):
+    output_dir = _write_fixture_bundle(tmp_path)
+    frame_index = pd.read_csv(output_dir / "frame_index.csv")
+    host_root = tmp_path / "host_machine"
+    frame_index["frame_path"] = frame_index["frame_path"].apply(
+        lambda rel: str(host_root / "data/pipeline" / rel)
+    )
+    frame_index.to_csv(output_dir / "frame_index.csv", index=False)
+
+    static_dir = tmp_path / "static"
+    static_dir.mkdir()
+    app = create_app(output_dir, static_dir)
+    client = TestClient(app)
+
+    res = client.get("/api/scene-images/0/begin")
+    assert res.status_code == 200
 
 
 def test_api_camera_compare_and_global(tmp_path):

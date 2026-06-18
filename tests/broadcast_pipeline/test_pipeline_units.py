@@ -157,20 +157,129 @@ def test_majority_vote_per_scene_tie_midpoint():
 
 
 def test_best_complete_match():
-    mapped, score = _best_complete_match("SIN", ["SINNER", "GAME"], min_score=0.5)
+    kwargs = dict(
+        min_match_chars=3,
+        min_reference_coverage=0.6,
+        min_prefix_coverage=0.5,
+        min_token_coverage=0.5,
+    )
+    mapped, score = _best_complete_match("SIN", ["SINNER", "GAME"], **kwargs)
     assert mapped == "SINNER"
     assert score >= 0.5
 
 
 def test_best_complete_match_requires_three_chars():
-    mapped, _score = _best_complete_match("SI", ["SINNER", "GAME"], min_score=0.1)
+    mapped, _score = _best_complete_match(
+        "SI",
+        ["SINNER", "GAME"],
+        min_match_chars=3,
+        min_reference_coverage=0.6,
+        min_prefix_coverage=0.5,
+        min_token_coverage=0.5,
+    )
     assert mapped is None
 
 
-def test_best_complete_match_three_char_subsequence():
-    mapped, score = _best_complete_match("GAM", ["GAME", "PLAYER"], min_score=0.5)
-    assert mapped == "GAME"
-    assert score >= 0.5
+def test_best_complete_match_prefix_fragments():
+    kwargs = dict(
+        min_match_chars=3,
+        min_reference_coverage=0.6,
+        min_prefix_coverage=0.5,
+        min_token_coverage=0.5,
+    )
+    candidates = ["SINNER", "GAME", "PLAYER"]
+    for token, expected in [("GAM", "GAME"), ("PLA", "PLAYER"), ("SIN", "SINNER")]:
+        mapped, score = _best_complete_match(token, candidates, **kwargs)
+        assert mapped == expected
+        assert score >= 0.5
+
+
+def test_best_complete_match_chase_accepts():
+    kwargs = dict(
+        min_match_chars=3,
+        min_reference_coverage=0.6,
+        min_prefix_coverage=0.5,
+        min_token_coverage=0.5,
+    )
+    candidates = ["CHASE"]
+    mapped, score = _best_complete_match("CHASEO", candidates, **kwargs)
+    assert mapped == "CHASE"
+    assert score == 1.0
+
+    mapped, score = _best_complete_match("CHAMO", candidates, **kwargs)
+    assert mapped == "CHASE"
+    assert abs(score - 0.6) < 1e-9
+
+
+def test_best_complete_match_chase_rejects():
+    kwargs = dict(
+        min_match_chars=3,
+        min_reference_coverage=0.6,
+        min_prefix_coverage=0.5,
+        min_token_coverage=0.5,
+    )
+    candidates = ["CHASE"]
+    for token in ("SCAVE", "SCAVESPEED"):
+        mapped, _score = _best_complete_match(token, candidates, **kwargs)
+        assert mapped is None
+
+
+def test_best_complete_match_rejects_low_token_coverage():
+    kwargs = dict(
+        min_match_chars=3,
+        min_reference_coverage=0.6,
+        min_prefix_coverage=0.5,
+        min_token_coverage=0.5,
+    )
+    mapped, _score = _best_complete_match("CHAMPIONSHIP", ["CHASE"], **kwargs)
+    assert mapped is None
+
+
+def test_best_complete_match_embedded_substring():
+    mapped, score = _best_complete_match(
+        "PMorgan",
+        ["JPMorgan"],
+        min_match_chars=3,
+        min_reference_coverage=0.6,
+        min_prefix_coverage=0.5,
+        min_token_coverage=0.5,
+    )
+    assert mapped == "JPMorgan"
+    assert score > 0.6
+
+
+def test_associate_text_chase_false_positives(tmp_path):
+    ref_path = tmp_path / "approved_text_reference.csv"
+    ref_path.write_text(
+        "complete_text,approved,first_seen_scene_id,first_seen_frame,discovery_count\n"
+        "CHASE,true,0,2168,1\n",
+        encoding="utf-8",
+    )
+    config = PipelineConfig(output_dir=tmp_path, reference_csv=ref_path)
+    frame_ocr = pd.DataFrame(
+        [
+            {
+                "scene_id": 0,
+                "frame_number": 2168,
+                "seconds": 90.0,
+                "camera_id": "cam_0",
+                "words_json": json.dumps(["SCAVE", "CHAMO", "CHASEO"]),
+                "verdict": "readable",
+                "used_unk": False,
+            }
+        ]
+    )
+    associated, dropped = associate_text(config, frame_ocr)
+    assert "SCAVE" in set(dropped["raw_text"])
+    assert "SCAVE" not in set(associated["raw_text"])
+
+    cham = associated.loc[associated["raw_text"] == "CHAMO"].iloc[0]
+    assert cham["mapped_complete_text"] == "CHASE"
+    assert abs(float(cham["mapping_confidence"]) - 0.6) < 1e-9
+
+    chaseo = associated.loc[associated["raw_text"] == "CHASEO"].iloc[0]
+    assert chaseo["mapped_complete_text"] == "CHASE"
+    assert float(chaseo["mapping_confidence"]) == 1.0
 
 
 def test_update_text_reference_preserves_extra_columns(tmp_path):

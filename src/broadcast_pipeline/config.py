@@ -51,8 +51,10 @@ class PipelineConfig:
     ocr_gc_interval: int = 100
     ocr_csv_flush_interval: int = 10
     unk_token: str = "UNK"
-    association_min_score: float = 0.6
     association_min_match_chars: int = 3
+    association_min_reference_coverage: float = 0.6
+    association_min_prefix_coverage: float = 0.5
+    association_min_token_coverage: float = 0.5
     enrich_enabled: bool = True
     enrich_region_iou: float = 0.3
     readability_size_multiplier: float = 1.25

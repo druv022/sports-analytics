@@ -13,6 +13,7 @@ from broadcast_pipeline.viz.camera_collage import (
     SlotName,
     load_camera_collage_bundle,
 )
+from broadcast_pipeline.viz.frame_paths import resolve_frame_under_output
 
 LayoutName = Literal["timeline", "grid"]
 
@@ -42,11 +43,9 @@ def _load_font(size: int = 14) -> ImageFont.ImageFont:
 
 
 def _resolve_frame_path(path: Path, output_dir: Path) -> Path:
-    if path.is_file():
-        return path.resolve()
-    candidate = (output_dir / path).resolve()
-    if candidate.is_file():
-        return candidate
+    resolved = resolve_frame_under_output(path, output_dir)
+    if resolved.is_file():
+        return resolved
     return path
 
 
